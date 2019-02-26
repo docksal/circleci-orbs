@@ -1,0 +1,48 @@
+.init: &init
+  docker:
+    - image: circleci/circleci-cli
+
+.publish: &publish
+  <<: *init
+  steps:
+    # Code checkout
+    - checkout
+    - run:
+        name: Publish orbs
+        command: |
+          tag="dev:${CIRCLE_BRANCH}"
+          [[ ${CIRCLE_TAG} != "" ]] && tag="${CIRCLE_TAG}"
+          orbs=$(find orbs -maxdepth 2 -name "*.yml")
+          for orb in ${orbs}
+          do
+            orbname=$(echo ${orb} | rev | cut -d'/' -f1 | rev | sed 's/.yml//')
+            namespace=$(echo ${orb} | rev | cut -d'/' -f2 | rev)
+            echo -n "Validating ${namespace}/${orbname}...   "
+            circleci orb validate ${orb} >/dev/null 2>&1
+            echo "ok"
+            # Create orb if does not exist
+            result=$(circleci orb list ${namespace} --token ${CIRCLECI_CLI_TOKEN} | grep -iE "^${namespace}/${orbname} .*publish" 2>/dev/null || true)
+            if [[ "${result}" == "" ]]
+            then
+              echo -n "Creating ${namespace}/${orbname}...   "
+              circleci orb create ${namespace}/${orbname} --no-prompt --token ${CIRCLECI_CLI_TOKEN} >/dev/null 2>&1
+              echo "ok"
+            fi
+            echo -n "Publishing ${namespace}/${orbname}...   "
+            circleci orb publish ${orb} ${namespace}/${orbname}@${tag} --token ${CIRCLECI_CLI_TOKEN} >/dev/null 2>&1
+            echo "ok"
+          done
+
+version: 2
+jobs:
+  publish:
+    <<: *publish
+
+workflows:
+  version: 2
+  publish-orbs:
+    jobs:
+      - publish:
+          filters:
+            tags:
+              only: /.*/

@@ -1,0 +1,48 @@
+version: 2.1
+
+.init: &init
+  docker:
+    - image: docksal/ci-agent:1.6-php
+  working_directory: /home/agent/build
+  environment:
+      BASH_ENV: /home/agent/.bashrc
+
+.run-envvars: &run-envvars
+  name: Configure agent environment
+  command: echo 'source build-env' >> $BASH_ENV
+
+jobs:
+  sandbox-init:
+    <<: *init
+    steps:
+      - run:
+          <<: *run-envvars
+      - checkout
+      - run:
+          name: Build sandbox
+          command: sandbox-init
+
+  code-sniffer:
+    <<: *init
+    steps:
+      - run:
+          <<: *run-envvars
+      - checkout
+      - run:
+          name: Running PHP Codesniffer
+          command: |
+            mkdir -p ~/phpcs
+            start_hash=$(git log --oneline --pretty=format:"%H" --merges --grep="Merge pull request" | head -1)
+            [[ "${start_hash}" == "" ]] && start_hash=$(git log --oneline --pretty=format:"%H" | tail -1)
+            end_hash=$(git log --oneline --pretty=format:"%H" | head -1)
+            git diff --name-only --diff-filter=ACMRTUXB ${start_hash} ${end_hash} >~/phpcs/file-list.txt
+            grep -v '^[[:space:]]*$' ~/phpcs/file-list.txt >/dev/null || exit 0
+            phpcs --standard=Drupal \
+              --extensions=php,inc,install,module,theme \
+              --ignore=drush,.docksal,.circleci,modules/features,*.pages_default.inc,*.panelizer.inc,*.features.menu_custom.inc,*.features.webform.inc,*.features.filter.inc,*.strongarm.inc,*.fpp_content_declarations.inc,*.panels_default.inc \
+              --report-summary --report-full=../phpcs/phpcs-report-full.txt --report-junit=../phpcs/phpcs-report.xml -n --file-list=~/phpcs/file-list.txt
+      - store_artifacts:
+          path: ~/phpcs
+          destination: phpcs
+      - store_test_results:
+          path: ~/phpcs
